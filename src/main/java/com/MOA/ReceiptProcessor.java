@@ -7,92 +7,120 @@ import java.util.List;
 
 public class ReceiptProcessor {
 
+    private static final BigDecimal MEMBER_RATE =
+            new BigDecimal("0.10");
+    private static final BigDecimal COUPON_RATE =
+            new BigDecimal("0.05");
+    private static final BigDecimal TAX_RATE =
+            new BigDecimal("0.075");
+
     public String createReceipt(
             String customer,
             List<String> itemLines,
             boolean member,
             String coupon) {
 
-        String customerName = customer;
-        if (customerName == null || customerName.isBlank()) {
-            customerName = "Guest";
-        } else {
-            customerName = customerName.trim();
-        }
-
+        String customerName = normalizeCustomer(customer);
         BigDecimal subtotal = BigDecimal.ZERO;
         int itemCount = 0;
 
         if (itemLines != null) {
             for (String line : itemLines) {
-                if (line == null || line.isBlank()) {
-                    continue;
+                BigDecimal price = parseItemPrice(line);
+
+                if (price != null) {
+                    subtotal = subtotal.add(price);
+                    itemCount++;
                 }
-
-                String[] parts = line.split("\\|", -1);
-                if (parts.length != 2) {
-                    continue;
-                }
-
-                String itemName = parts[0].trim();
-                String priceText = parts[1].trim();
-
-                if (itemName.isEmpty() || priceText.isEmpty()) {
-                    continue;
-                }
-
-                BigDecimal price;
-                try {
-                    price = new BigDecimal(priceText);
-                } catch (NumberFormatException exception) {
-                    continue;
-                }
-
-                if (price.compareTo(BigDecimal.ZERO) < 0) {
-                    continue;
-                }
-
-                subtotal = subtotal.add(price);
-                itemCount++;
             }
         }
 
-        subtotal = subtotal.setScale(2, RoundingMode.HALF_UP);
+        subtotal = money(subtotal);
+
+        BigDecimal discount =
+                calculateDiscount(subtotal, member, coupon);
+
+        BigDecimal taxableAmount = subtotal.subtract(discount);
+        BigDecimal tax = calculateTax(taxableAmount);
+        BigDecimal total = money(taxableAmount.add(tax));
+
+        return formatReceipt(
+                customerName, itemCount, subtotal, discount, tax, total);
+    }
+
+    private String normalizeCustomer(String customer) {
+        if (customer == null || customer.isBlank()) {
+            return "Guest";
+        }
+        return customer.trim();
+    }
+
+    private BigDecimal parseItemPrice(String line) {
+        if (line == null || line.isBlank()) {
+            return null;
+        }
+
+        String[] parts = line.split("\\|", -1);
+        if (parts.length != 2) {
+            return null;
+        }
+
+        String itemName = parts[0].trim();
+        String priceText = parts[1].trim();
+
+        if (itemName.isEmpty() || priceText.isEmpty()) {
+            return null;
+        }
+
+        try {
+            BigDecimal price = new BigDecimal(priceText);
+            return price.compareTo(BigDecimal.ZERO) < 0
+                    ? null : price;
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
+    private BigDecimal calculateDiscount(
+            BigDecimal subtotal, boolean member, String coupon) {
 
         BigDecimal discount = BigDecimal.ZERO;
 
         if (member) {
-            discount = subtotal.multiply(new BigDecimal("0.10"))
-                    .setScale(2, RoundingMode.HALF_UP);
+            discount = money(subtotal.multiply(MEMBER_RATE));
         }
 
-        BigDecimal afterMemberDiscount = subtotal.subtract(discount);
+        BigDecimal remaining = subtotal.subtract(discount);
 
         if ("SAVE5".equals(coupon)) {
-            BigDecimal couponDiscount = afterMemberDiscount
-                    .multiply(new BigDecimal("0.05"))
-                    .setScale(2, RoundingMode.HALF_UP);
-
+            BigDecimal couponDiscount =
+                    money(remaining.multiply(COUPON_RATE));
             discount = discount.add(couponDiscount);
         }
 
-        BigDecimal taxableAmount = subtotal.subtract(discount);
+        return discount;
+    }
 
-        BigDecimal tax = taxableAmount
-                .multiply(new BigDecimal("0.075"))
-                .setScale(2, RoundingMode.HALF_UP);
+    private BigDecimal calculateTax(BigDecimal taxableAmount) {
+        return money(taxableAmount.multiply(TAX_RATE));
+    }
 
-        BigDecimal total = taxableAmount.add(tax)
-                .setScale(2, RoundingMode.HALF_UP);
+    private BigDecimal money(BigDecimal amount) {
+        return amount.setScale(2, RoundingMode.HALF_UP);
+    }
 
-        StringBuilder receipt = new StringBuilder();
-        receipt.append("Customer: ").append(customerName).append("\n");
-        receipt.append("Items: ").append(itemCount).append("\n");
-        receipt.append("Subtotal: ").append(subtotal.toPlainString()).append("\n");
-        receipt.append("Discount: ").append(discount.toPlainString()).append("\n");
-        receipt.append("Tax: ").append(tax.toPlainString()).append("\n");
-        receipt.append("Total: ").append(total.toPlainString());
+    private String formatReceipt(
+            String customer, int itemCount,
+            BigDecimal subtotal, BigDecimal discount,
+            BigDecimal tax, BigDecimal total) {
 
-        return receipt.toString();
+        return new StringBuilder()
+                .append("Customer: ").append(customer).append("\n")
+                .append("Items: ").append(itemCount).append("\n")
+                .append("Subtotal: ").append(subtotal.toPlainString()).append("\n")
+                .append("Discount: ").append(discount.toPlainString()).append("\n")
+                .append("Tax: ").append(tax.toPlainString()).append("\n")
+                .append("Total: ").append(total.toPlainString())
+                .toString();
     }
 }
